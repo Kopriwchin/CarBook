@@ -1,0 +1,89 @@
+<%- include('partials/header') %>
+
+<div class="mb-8 flex justify-between items-center">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900">Моят Гараж</h1>
+        <p class="text-gray-500 mt-1">Управлявайте автомобилите и правете справки.</p>
+    </div>
+    <a href="/add-vehicle" class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg shadow hover:bg-indigo-700 transition flex items-center">
+        <i class="fas fa-plus mr-2"></i> Добави кола
+    </a>
+</div>
+
+<% if (vehicles.length === 0) { %>
+    <div class="text-center py-20 bg-white rounded-xl shadow-sm border border-dashed border-gray-300">
+       <p>Нямате автомобили.</p>
+       <a href="/add-vehicle" class="text-indigo-600">Добави сега</a>
+    </div>
+<% } else { %>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <% vehicles.forEach(car => { %>
+            <div class="bg-white rounded-xl shadow-sm hover:shadow-md transition border border-gray-100 overflow-visible relative">
+                <div class="p-5 border-b border-gray-50 flex justify-between items-start bg-gray-50">
+                    <div>
+                        <h3 class="font-bold text-lg text-gray-800"><%= car.brand %> <%= car.model %></h3>
+                        <span class="text-xs font-mono bg-gray-200 text-gray-700 px-2 py-1 rounded mt-1 inline-block">
+                            <%= car.regPlate %>
+                        </span>
+                    </div>
+                    <div class="text-gray-400">
+                        <i class="fas fa-car-side fa-lg"></i>
+                    </div>
+                </div>
+
+                <div class="p-5 space-y-3 pb-20"> <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Дата на пр.</span>
+                        <span class="font-medium"><%= new Date(car.manufactureDate).toLocaleDateString('bg-BG') %></span>
+                    </div>
+                    
+                    <div class="pt-4 mt-2 border-t relative">
+                        <button onclick="toggleMenu('<%= car._id %>')" 
+                                class="w-full flex justify-between items-center bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-100 transition">
+                            <span>Избери Проверка</span>
+                            <i class="fas fa-chevron-down text-xs"></i>
+                        </button>
+
+                        <div id="menu-<%= car._id %>" class="hidden absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-100 z-10 overflow-hidden">
+                            <a href="/check/insurance/<%= car._id %>" class="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-indigo-600 border-b border-gray-50">
+                                <i class="fas fa-file-contract w-6 text-center"></i> Гражданска
+                            </a>
+                            <a href="/check/inspection/<%= car._id %>" class="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-indigo-600 border-b border-gray-50">
+                                <i class="fas fa-tools w-6 text-center"></i> ГТП (Преглед)
+                            </a>
+                            <a href="/check/vignette/<%= car._id %>" class="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-indigo-600 border-b border-gray-50">
+                                <i class="fas fa-ticket-alt w-6 text-center"></i> Винетка (BGTOLL)
+                            </a>
+                            <a href="/check/fines/<%= car._id %>" class="block px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-red-600">
+                                <i class="fas fa-exclamation-triangle w-6 text-center"></i> Глоби (КАТ)
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <% }) %>
+    </div>
+<% } %>
+
+<script>
+    function toggleMenu(carId) {
+        const menu = document.getElementById('menu-' + carId);
+        
+        document.querySelectorAll('[id^="menu-"]').forEach(el => {
+            if (el.id !== 'menu-' + carId) el.classList.add('hidden');
+        });
+
+        menu.classList.toggle('hidden');
+    }
+
+    // Затвори менюто, ако кликнем извън него
+    window.onclick = function(event) {
+        if (!event.target.closest('button')) {
+            document.querySelectorAll('[id^="menu-"]').forEach(el => {
+                el.classList.add('hidden');
+            });
+        }
+    }
+</script>
+
+<%- include('partials/footer') %>
