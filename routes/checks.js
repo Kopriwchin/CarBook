@@ -131,18 +131,66 @@ router.post('/check/inspection/:id', requireLogin, async (req, res) => {
         let resultData = {};
 
         if (successElement && await successElement.isVisible()) {
-            // Валиден преглед
-            const validText = await page.$eval('.resultYes', el => el.innerText);
-            resultData = { success: true, text: validText };
+            // УСПЕШЕН ПРЕГЛЕД
+            const extracted = await page.evaluate(() => {
+                const container = document.querySelector('.resultYes');
+                // Взимаме всички елементи с клас "reg"
+                const regElements = container.querySelectorAll('.reg');
+                const vinElement = container.querySelector('var[data-bind*="rvIdentNumber"]');
+                
+                // HTML СТРУКТУРА СПОРЕД ТВОЯ КОД:
+                // regElements[0] -> Рег. номер (CT4373PP)
+                // regElements[1] -> Еко група (4)
+                // regElements[2] -> Текст "валиден до" (НЕНУЖЕН)
+                // regElements[3] -> Датата (17.05.2026)
+
+                return {
+                    plate: regElements[0]?.innerText.trim(),
+                    eco: regElements[1]?.innerText.trim() || '-',
+                    // ВЗИМАМЕ ИНДЕКС 3 ЗА ДАТАТА:
+                    date: regElements[3]?.innerText.trim(), 
+                    vin: vinElement?.innerText.trim()
+                };
+            });
+
+            // Форматираме текста както ти поиска
+            const formattedHTML = `
+                Превозното средство с регистрационен номер <b>${extracted.plate}</b> с <b>ЕКО Група ${extracted.eco}</b><br>
+                <b>Има</b> валиден периодичен технически преглед!<br><br>
+                Валиден до <b>${extracted.date}</b><br>
+                Идент. № (VIN, рама): ${extracted.vin}
+            `;
+
+            resultData = { success: true, text: formattedHTML };
+
         } else if (failElement && await failElement.isVisible()) {
-            // Невалиден или няма данни
-            const failText = await page.$eval('.resultNo', el => el.innerText);
-            resultData = { success: false, text: failText };
+            // НЕУСПЕШЕН / ИЗТЕКЪЛ ПРЕГЛЕД
+            // Структурата при resultNo е идентична за датите
+            const extractedFail = await page.evaluate(() => {
+                const container = document.querySelector('.resultNo');
+                const regElements = container.querySelectorAll('.reg');
+                const vinElement = container.querySelector('var[data-bind*="rvIdentNumber"]');
+
+                return {
+                    plate: regElements[0]?.innerText.trim(),
+                    // При resultNo датата на изтичане пак е на индекс 3 ("изтекъл на" е индекс 2)
+                    date: regElements[3]?.innerText.trim(),
+                    vin: vinElement?.innerText.trim()
+                };
+            });
+
+            const formattedFailHTML = `
+                Превозното средство с регистрационен номер <b>${extractedFail.plate}</b><br>
+                <b style="color:red">НЯМА</b> валиден периодичен технически преглед!<br><br>
+                Изтекъл на <b>${extractedFail.date}</b><br>
+                Идент. № (VIN, рама): ${extractedFail.vin}
+            `;
+
+            resultData = { success: false, text: formattedFailHTML };
         } else {
-             // Проверка за специфична грешка (RegistrationNumberInvalidException)
+             // ... грешките остават същите
              const regError = await page.$('.vehicleRegistrationNumber.error');
              if(regError) throw new Error('Невалиден формат на регистрационния номер.');
-             
              throw new Error('Неуспешно разчитане на резултата.');
         }
 
