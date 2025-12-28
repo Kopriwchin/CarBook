@@ -30,6 +30,7 @@ app.use(session({
 
 app.use((req, res, next) => {
     res.locals.userId = req.session.userId;
+    res.locals.userEmail = req.session.userEmail;
     next();
 });
 
@@ -38,8 +39,7 @@ app.use(vehicleRoutes);
 app.use(checkRoutes);
 
 app.get('/', (req, res) => {
-    // We will create views/index.ejs later
-    res.send('<h1>Welcome to Car Tracker! Server is running.</h1>'); 
+    res.redirect('/dashboard');
 });
 
 app.get('/dashboard', (req, res) => {

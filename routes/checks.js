@@ -74,6 +74,14 @@ router.get('/check/inspection/:id', requireLogin, async (req, res) => {
     }
 });
 
+router.get('/check/insurance/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    if (!car)
+        return;
+    
+    res.render('checks/insurance', { car, result: null, error: null, loading: false });
+});
+
 router.post('/check/insurance/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
     if (!car) {
@@ -219,127 +227,128 @@ router.post('/check/insurance/:id', requireLogin, async (req, res) => {
     }
 });
 
-router.get('/check/insurance/:id', requireLogin, async (req, res) => {
+router.get('/check/vignette/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
-    if (!car)
-        return;
-    
-    res.render('checks/insurance', { car, result: null, error: null, loading: false });
+    if (!car) return;
+    res.render('checks/vignette', { car, result: null, error: null, loading: false });
 });
 
-router.post('/check/insurance/:id', requireLogin, async (req, res) => {
+router.post('/check/vignette/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
     if (!car) return;
 
-    // Използваме encodeURI, за да сме сигурни, че кирилицата в адреса не чупи Puppeteer
-    const targetUrl = encodeURI('https://www.guaranteefund.org/bg/%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%BE%D0%BD%D0%B5%D0%BD-%D1%86%D0%B5%D0%BD%D1%82%D1%8A%D1%80-%D0%B8-%D1%81%D0%BF%D1%80%D0%B0%D0%B2%D0%BA%D0%B8/%D1%83%D1%81%D0%BB%D1%83%D0%B3%D0%B8/%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0-%D0%B7%D0%B0-%D0%B2%D0%B0%D0%BB%D0%B8%D0%B4%D0%BD%D0%B0-%D0%B7%D0%B0%D1%81%D1%82%D1%80%D0%B0%D1%85%D0%BE%D0%B2%D0%BA%D0%B0-%D0%B3%D1%80%D0%B0%D0%BD%D0%B8%D1%87%D0%BD%D0%B0-%D0%B3%D1%80%D0%B0%D0%B6%D0%B4%D0%B0%D0%BD%D1%81%D0%BA%D0%B0-%D0%BE%D1%82%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%BD%D0%BE%D1%81%D1%82#validgo');
-
+    const targetUrl = 'https://check.bgtoll.bg/';
     let browser = null;
 
     try {
-        // 1. Стартираме браузъра във ВИДИМ режим (за да дебъгваш)
         browser = await puppeteer.launch({ 
-            headless: false, // ВАЖНО: Виждаш браузъра на екрана си
-            defaultViewport: null, // Използва целия прозорец
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--window-size=1280,800', // Стандартен размер на прозореца
-                '--start-maximized'
-            ]
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080']
         });
 
-        const page = await browser.newPage();
-        
-        // 2. Представяме се за истински Chrome браузър (User Agent Spoofing)
-        // Това е критично, за да не ни блокират
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        const pages = await browser.pages();
+        const page = pages[0];
+        await page.setViewport({ width: 1920, height: 1080 });
 
-        console.log("Navigating to GF...");
-        
-        // 3. Зареждане на страницата с по-голям timeout (60 сек)
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        // 1. Зареждане
+        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
-        // Понякога формата е в iframe или се зарежда динамично. 
-        // Чакаме малко повече, за да се уверим, че скриптовете на сайта са сработили.
-        // Тук търсим ID-то на формата, не само на инпута, за по-сигурно.
-        console.log("Waiting for form...");
-        await page.waitForSelector('#dkn', { visible: true, timeout: 30000 });
+        // 2. Намиране на полето (Input)
+        // Тъй като е React, чакаме формата да се появи
+        await page.waitForSelector('.CarRegistrationForm input', { timeout: 15000 });
 
-        console.log("Form found. Typing plate...");
-        
-        // 4. Попълване на Рег. номер
+        // Почистване на номера (BG Toll иска слято, напр. СТ4373РР)
         const cleanPlate = car.regPlate.replace(/\s+/g, '').toUpperCase();
         
-        // Пишем бавно, като човек (delay: 100ms)
-        await page.type('#dkn', cleanPlate, { delay: 100 });
+        // Кликаме в полето и пишем (за да тригернем React event-ите)
+        await page.click('.CarRegistrationForm input');
+        await page.type('.CarRegistrationForm input', cleanPlate, { delay: 100 });
 
-        // 5. Справяне с ALTCHA
-        const altchaSelector = 'input[name="altcha_checkbox"]';
-        
-        // Проверяваме дали Altcha съществува
-        const altchaExists = await page.$(altchaSelector);
-        if (altchaExists) {
-            console.log("Clicking Altcha...");
-            await page.click(altchaSelector);
-            
-            // Чакаме верификация (до 20 секунди)
-            // Търсим елемент, който показва, че проверката е минала
-            try {
-                await page.waitForFunction(() => {
-                    const el = document.querySelector('.altcha');
-                    return el && el.getAttribute('data-state') === 'verified';
-                }, { timeout: 20000 });
-                console.log("Altcha verified!");
-            } catch (e) {
-                console.log("Warning: Altcha verify check timed out, trying to submit anyway...");
-            }
-        } else {
-            console.log("Altcha not found on page?");
-        }
+        // 3. Натискане на бутона "Проверка"
+        // Търсим бутон със зелен клас вътре във формата
+        await page.click('.CarRegistrationForm .btn-success');
 
-        // 6. Изпращане (Кликаме бутона "Търси")
-        await page.click('input[name="send"]');
-
-        console.log("Submitted. Waiting for results...");
-
-        // 7. Чакаме резултата
-        // Важно: Тук чакаме нещо да се промени. 
-        // Ако сайтът презарежда страницата, използваме waitForNavigation
-        // Ако сайтът ползва AJAX, чакаме селектор.
-        // При ГФ обикновено формата изчезва или се появява съобщение.
-        
-        // Изчакваме мрежовата активност да утихне
+        // 4. Чакаме резултат
+        // Тук има два варианта: Или таблица с резултати, или съобщение (ако няма винетка)
+        // Ще изчакаме контейнера .CheckResult
         try {
-            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
-        } catch(e) {
-            // Ако не навигира, значи е обновило DOM-а на място
+            await page.waitForSelector('.CheckResult', { visible: true, timeout: 10000 });
+        } catch (e) {
+            throw new Error("Няма намерени данни или сайтът не отговаря.");
         }
 
-        // 8. Взимаме HTML-а на резултата
+        // 5. Извличане на данни (Scraping)
         const resultHTML = await page.evaluate(() => {
-            // Опитваме се да намерим контейнера с резултата
-            // Често ГФ връща резултата в <div class="article-content"> или подобно
+            // Проверяваме дали има таблица
+            const table = document.querySelector('.CheckResult table');
             
-            // Проверяваме за грешки на екрана
-            const errorMsg = document.querySelector('.system_msg'); // Пример
-            if (errorMsg) return `<b style="color:red">${errorMsg.innerText}</b>`;
+            if (!table) {
+                // Ако контейнерът се е появил, но няма таблица, значи няма винетки
+                return `<div class="text-center bg-red-50 p-6 rounded-lg border border-red-100">
+                            <i class="fas fa-times-circle text-red-500 text-3xl mb-3"></i>
+                            <h3 class="text-lg font-bold text-red-700">Няма активна винетка</h3>
+                            <p class="text-red-600 text-sm mt-1">За този автомобил не са намерени данни за електронна винетка.</p>
+                        </div>`;
+            }
 
-            // Проверяваме за таблица с резултати
-            const resultTable = document.querySelector('table'); 
-            // Взимаме бодито, за да видим какво е станало, ако няма специфичен селектор
-            const content = document.querySelector('.article-content') || document.body;
+            // Ако има таблица, взимаме редовете (може да са повече от една винетка)
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
             
-            // Чистим формата, за да не я показваме
-            const form = content.querySelector('form');
-            if (form) form.remove();
+            let htmlCards = '';
 
-            return content.innerHTML;
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                // Mapping според HTML-а, който предостави:
+                // [0] ID, [1] Vehicle Class, [2] Emission, [3] Start, [4] End, [5] Price, [6] Status
+                
+                const vignetteId = cells[0]?.innerText || '-';
+                const startDate = cells[3]?.innerText || '-';
+                const endDate = cells[4]?.innerText || '-';
+                const statusElement = cells[6]?.querySelector('span');
+                const statusText = statusElement?.innerText.trim() || 'Неизвестен';
+                const price = cells[5]?.innerText || '-';
+
+                // Определяме цвета на статуса
+                // Класът 'paid' обикновено е зелен, но проверяваме и текста
+                const isActive = statusText.toLowerCase().includes('активна');
+                const statusColor = isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
+
+                htmlCards += `
+                    <div class="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
+                        <div class="flex justify-between items-start border-b border-gray-200 pb-3 mb-3">
+                            <div>
+                                <span class="text-xs text-gray-500 uppercase tracking-wide">ID на винетка</span>
+                                <div class="font-mono font-bold text-gray-800 text-lg">${vignetteId}</div>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase ${statusColor}">
+                                ${statusText}
+                            </span>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-500 block">Валидна от</span>
+                                <span class="font-semibold text-gray-900">${startDate}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 block">Валидна до</span>
+                                <span class="font-semibold text-gray-900">${endDate}</span>
+                            </div>
+                            <div class="col-span-2 mt-2 pt-2 border-t border-gray-200 flex justify-between">
+                                <span class="text-gray-500">Цена</span>
+                                <span class="font-bold text-gray-900">${price}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            return htmlCards;
         });
 
         await browser.close();
 
-        res.render('checks/insurance', { 
+        res.render('checks/vignette', { 
             car, 
             result: resultHTML, 
             error: null,
@@ -347,28 +356,16 @@ router.post('/check/insurance/:id', requireLogin, async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Puppeteer Error:", err);
-        
-        // Правим снимка на грешката, за да я видиш във папката на проекта!
-        if (browser) {
-            const pages = await browser.pages();
-            if (pages.length > 0) {
-                await pages[0].screenshot({ path: 'debug-error.png' });
-                console.log("Screenshot saved to debug-error.png");
-            }
-            await browser.close();
-        }
-
-        res.render('checks/insurance', { 
+        console.error("Vignette Error:", err);
+        if (browser) await browser.close();
+        res.render('checks/vignette', { 
             car, 
             result: null, 
-            error: 'Грешка: ' + err.message,
+            error: 'Възникна грешка при връзката с BG Toll.',
             loading: false
         });
     }
 });
-
-router.get('/check/vignette/:id', requireLogin, async (req, res) => { res.send("Скоро"); });
 
 router.get('/check/fines/:id', requireLogin, async (req, res) => { res.send("Скоро"); });
 
