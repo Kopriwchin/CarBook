@@ -11,26 +11,45 @@
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 flex flex-col min-h-screen">
-
-    <nav class="bg-white shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex">
-                    <a href="/dashboard" class="flex-shrink-0 flex items-center text-indigo-600 font-bold text-xl">
-                        <i class="fa-solid fa-car-side mr-2"></i> CarBook BG
+<nav class="bg-white shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+            <div class="flex">
+                <a href="/dashboard" class="flex-shrink-0 flex items-center text-indigo-600 font-bold text-xl">
+                    <i class="fa-solid fa-car-side mr-2"></i> CarBook BG
+                </a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <% if (typeof userId !== 'undefined' && userId) { %>
+                    <a href="/dashboard" class="text-gray-600 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium">
+                        Гараж
                     </a>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <% if (typeof userId !== 'undefined' && userId) { %>
-                        <a href="/dashboard" class="text-gray-600 hover:text-indigo-600 px-3 py-2 rounded-md text-sm font-medium">Табло</a>
-                        <a href="/logout" class="text-gray-500 hover:text-red-500 text-sm font-medium ml-4">Изход</a>
-                    <% } else { %>
-                        <a href="/login" class="text-gray-600 hover:text-indigo-600 px-3 py-2 text-sm font-medium">Вход</a>
-                        <a href="/register" class="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-md text-sm font-medium transition">Регистрация</a>
+
+                    <a href="/add-vehicle" class="bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-md text-sm font-medium transition mx-2">
+                        <i class="fas fa-plus"></i>
+                    </a>
+
+                    <a href="/profile" class="group flex items-center text-gray-500 hover:text-indigo-600 px-3 py-2 transition rounded-md ml-2">
+                        <i class="fas fa-user-circle fa-lg group-hover:text-indigo-600 transition"></i>
+                        
+                        <% 
+                            let displayName = 'Профил';
+                            if (typeof userEmail !== 'undefined' && userEmail) {
+                                displayName = userEmail.split('@')[0];
+                            }
+                        %>
+                        <span class="ml-2 text-sm font-medium group-hover:text-indigo-600 transition max-w-[150px] truncate">
+                            <%= displayName %>
+                        </span>
+                    </a>
+
+                    <a href="/logout" class="text-gray-500 hover:text-red-500 text-sm font-medium ml-2">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </a>
+                <% } else { %>
                     <% } %>
-                </div>
             </div>
         </div>
-    </nav>
-
-    <main class="flex-grow container mx-auto px-4 py-8">
+    </div>
+</nav>
+<main class="flex-grow container mx-auto px-4 py-8">

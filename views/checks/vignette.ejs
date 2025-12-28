@@ -1,0 +1,78 @@
+<%- include('../partials/header') %>
+
+<div class="max-w-4xl mx-auto">
+    <a href="/dashboard" class="text-gray-500 hover:text-indigo-600 mb-6 inline-block">
+        <i class="fas fa-arrow-left mr-1"></i> Назад към таблото
+    </a>
+
+    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Електронна Винетка</h1>
+            <p class="text-gray-500">Справка в системата на BG Toll</p>
+        </div>
+        <div class="text-right bg-gray-50 p-3 rounded-lg">
+            <div class="text-sm text-gray-500">Автомобил</div>
+            <div class="font-bold text-gray-800"><%= car.brand %> <%= car.model %></div>
+            <div class="font-mono text-indigo-600"><%= car.regPlate %></div>
+        </div>
+    </div>
+
+    <div class="bg-white p-8 rounded-xl shadow-lg border border-gray-100 min-h-[300px]">
+
+        <% if (error) { %>
+            <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
+                <p class="text-red-700 font-bold"><%= error %></p>
+                <form action="/check/vignette/<%= car._id %>" method="POST" class="mt-4">
+                    <button type="submit" class="text-red-700 underline hover:text-red-800">Опитайте отново</button>
+                </form>
+            </div>
+        <% } %>
+
+        <% if (result) { %>
+            <div class="max-w-xl mx-auto">
+                <h3 class="text-lg font-bold text-gray-800 mb-6 text-center">Намерени винетки</h3>
+                
+                <%- result %>
+            </div>
+            
+            <div class="mt-8 text-center">
+                <a href="/dashboard" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Обратно</a>
+            </div>
+
+        <% } else if (!error) { %>
+            <div class="flex flex-col items-center justify-center py-10">
+                <div class="bg-teal-50 p-4 rounded-full mb-6">
+                    <i class="fas fa-road text-teal-600 text-3xl"></i>
+                </div>
+                
+                <h3 class="text-xl font-medium text-gray-900 mb-2">Проверка на Винетка</h3>
+                <p class="text-gray-500 text-center max-w-md mb-8">
+                    Проверете валидността на вашата електронна винетка директно в системата на BG Toll за автомобил <b><%= car.regPlate %></b>.
+                </p>
+
+                <form action="/check/vignette/<%= car._id %>" method="POST" onsubmit="showLoading()">
+                    <button type="submit" id="checkBtn" 
+                            class="px-8 py-3 bg-teal-600 text-white rounded-lg font-bold shadow-lg hover:bg-teal-700 hover:shadow-xl transition transform hover:-translate-y-0.5 flex items-center">
+                        <span>Провери статус</span>
+                        <i class="fas fa-search ml-2"></i>
+                    </button>
+                </form>
+
+                <div id="loading" class="hidden mt-8 text-center">
+                    <i class="fas fa-circle-notch fa-spin text-teal-600 text-4xl mb-4"></i>
+                    <p class="text-gray-600 font-medium">Свързване с BG Toll...</p>
+                </div>
+            </div>
+        <% } %>
+
+    </div>
+</div>
+
+<script>
+    function showLoading() {
+        document.getElementById('checkBtn').classList.add('hidden');
+        document.getElementById('loading').classList.remove('hidden');
+    }
+</script>
+
+<%- include('../partials/footer') %>
