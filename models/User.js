@@ -3,12 +3,13 @@ const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true }
+    password: { type: String, required: true },
+    sumps: { type: String, default: '' },
+    egn: { type: String, default: '' }
 });
-
 userSchema.pre('save', async function() {
-    if (!this.isModified('password')) return;
-
+    if (!this.isModified('password'))
+        return;
     this.password = await bcrypt.hash(this.password, 12);
 });
 
