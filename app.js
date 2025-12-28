@@ -1,26 +1,26 @@
-require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const session = require('express-session');
-
 const MongoStore = require('connect-mongo').default;
-const app = express();
+const path = require('path');
+require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const vehicleRoutes = require('./routes/vehicles');
 const checkRoutes = require('./routes/checks');
+const shopRoutes = require('./routes/shop'); 
 
-// 1. Database Connection
+const app = express();
+
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected'))
-  .catch(err => console.error('❌ DB Connection Error:', err));
+  .then(() => console.log('MongoDB Connected'))
+  .catch(err => console.error(err));
 
-// 2. Middleware (Settings)
-app.set('view engine', 'ejs'); // Use EJS for HTML
-app.use(express.urlencoded({ extended: true })); // Parse form data (POST requests)
-app.use(express.static('public')); // Serve CSS/JS from public folder
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// 3. Session Setup (Login state)
 app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
@@ -34,22 +34,14 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(authRoutes);
-app.use(vehicleRoutes);
-app.use(checkRoutes);
-
 app.get('/', (req, res) => {
     res.redirect('/dashboard');
 });
 
-app.get('/dashboard', (req, res) => {
-    if (!req.session.userId) {
-        return res.redirect('/login');
-    }
-    res.send(`<h1>Dashboard</h1><p>You are logged in! User ID: ${req.session.userId}</p><a href='/logout'>Logout</a>`);
-});
+app.use(authRoutes);
+app.use(vehicleRoutes);
+app.use(checkRoutes);
+app.use(shopRoutes); 
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

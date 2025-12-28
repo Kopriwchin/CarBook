@@ -1,55 +1,80 @@
-// routes/vehicles.js
 const express = require('express');
 const router = express.Router();
-const Vehicle = require('../models/Vehicle'); // Import the model we made earlier
+const Vehicle = require('../models/Vehicle');
+const User = require('../models/User');
 
-// Middleware to check if user is logged in
 const requireLogin = (req, res, next) => {
-    if (!req.session.userId) {
-        return res.redirect('/login');
-    }
+    if (!req.session.userId) return res.redirect('/login');
     next();
 };
 
-// GET: Dashboard (List all vehicles)
 router.get('/dashboard', requireLogin, async (req, res) => {
     try {
-        // Find vehicles belonging to the logged-in user
+        const user = await User.findById(req.session.userId);
+        
         const vehicles = await Vehicle.find({ owner: req.session.userId });
-        res.render('dashboard', { vehicles });
+        
+        const usedSlots = vehicles.length;
+        const totalSlots = user.carLimit;
+        
+        res.render('dashboard', { 
+            vehicles, 
+            usedSlots, 
+            totalSlots 
+        });
     } catch (err) {
         console.error(err);
-        res.render('dashboard', { vehicles: [], error: 'Could not load vehicles.' });
+        res.redirect('/login');
     }
 });
 
-// GET: Add Vehicle Form
-router.get('/add-vehicle', requireLogin, (req, res) => {
-    res.render('add-vehicle');
+router.get('/add-vehicle', requireLogin, async (req, res) => {
+    const user = await User.findById(req.session.userId);
+    const vehicleCount = await Vehicle.countDocuments({ owner: req.session.userId });
+
+    if (vehicleCount >= user.carLimit) {
+        return res.render('shop/limit_reached', { limit: user.carLimit });
+    }
+
+    res.render('add-vehicle', { error: null });
 });
 
 router.post('/add-vehicle', requireLogin, async (req, res) => {
-    const { brand, model, manufactureDate, regPlate, color, fuelType } = req.body;
+    const user = await User.findById(req.session.userId);
+    const vehicleCount = await Vehicle.countDocuments({ owner: req.session.userId });
 
+    if (vehicleCount >= user.carLimit) {
+        return res.redirect('/shop');
+    }
+
+    const { brand, model, manufactureDate, color, regPlate, fuelType, insuranceExpiry } = req.body;
+    
     try {
-        const newCar = new Vehicle({
+        const vehicle = new Vehicle({
             owner: req.session.userId,
             brand,
             model,
             manufactureDate,
-            regPlate: regPlate.toUpperCase(),
             color,
-            fuelType
+            regPlate,
+            fuelType,
+            insuranceExpiry
         });
-        
-        await newCar.save();
+        await vehicle.save();
         res.redirect('/dashboard');
     } catch (err) {
         console.error(err);
-        res.render('add-vehicle', { 
-            error: 'Грешка при добавяне. Регистрационният номер може вече да съществува.',
-            formData: req.body 
-        });
+        res.render('add-vehicle', { error: 'Възникна грешка при добавянето.' });
+    }
+});
+
+router.post('/delete-vehicle/:id', requireLogin, async (req, res) => {
+    try {
+        await Vehicle.findOneAndDelete({ _id: req.params.id, owner: req.session.userId });
+        res.redirect('/dashboard');
+    } catch (err) {
+        console.error(err);
+        res.redirect('/dashboard');
     }
 });
 
