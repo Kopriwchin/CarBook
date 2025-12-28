@@ -7,8 +7,8 @@
 
     <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6 flex justify-between items-center">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900">Проверка на Гражданска Отговорност</h1>
-            <p class="text-gray-500">Справка в системата на Гаранционен Фонд</p>
+            <h1 class="text-2xl font-bold text-gray-900">Гражданска Отговорност</h1>
+            <p class="text-gray-500">Справка в Гаранционен Фонд</p>
         </div>
         <div class="text-right bg-gray-50 p-3 rounded-lg">
             <div class="text-sm text-gray-500">Автомобил</div>
@@ -17,22 +17,72 @@
         </div>
     </div>
 
-    <div class="bg-white p-8 rounded-xl shadow-lg border border-gray-100 min-h-[300px] flex flex-col items-center justify-center">
-        
-        <div class="bg-blue-50 text-blue-600 p-4 rounded-full mb-4">
-            <i class="fas fa-sync fa-spin fa-2x"></i>
-        </div>
-        <h3 class="text-lg font-medium text-gray-900">Системата е в разработка...</h3>
-        <p class="text-gray-500 text-center max-w-md mt-2">
-            В момента интегрираме връзката с регистъра на застрахователите. 
-            Скоро тук ще виждате валидността на вашата полица.
-        </p>
+    <div class="bg-white p-8 rounded-xl shadow-lg border border-gray-100 min-h-[300px]">
 
-        <button class="mt-6 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-gray-700 text-sm transition">
-            Симулирай проверка
-        </button>
+        <% if (error) { %>
+            <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
+                <p class="text-red-700 font-bold"><%= error %></p>
+                <form action="/check/insurance/<%= car._id %>" method="POST" class="mt-4">
+                    <button type="submit" class="text-red-700 underline hover:text-red-800">Опитайте отново</button>
+                </form>
+            </div>
+        <% } %>
 
+        <% if (result) { %>
+            <div class="max-w-xl mx-auto">
+                <div class="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+                    <h3 class="text-lg font-bold text-gray-800 mb-6 text-center border-b pb-4">Резултат от справката</h3>
+                    
+                    <div class="text-sm">
+                        <%- result %>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-8 text-center">
+                <a href="/dashboard" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Обратно</a>
+            </div>
+
+        <% } else if (!error) { %>
+            <div class="flex flex-col items-center justify-center py-10">
+                <div class="bg-blue-50 p-4 rounded-full mb-6">
+                    <i class="fas fa-file-signature text-blue-600 text-3xl"></i>
+                </div>
+                
+                <h3 class="text-xl font-medium text-gray-900 mb-2">Автоматична проверка</h3>
+                <p class="text-gray-500 text-center max-w-md mb-8">
+                    Системата автоматично ще се свърже с Гаранционния фонд, ще попълни данните на автомобила (<b><%= car.regPlate %></b>) и ще верифицира заявката.
+                </p>
+
+                <form action="/check/insurance/<%= car._id %>" method="POST" onsubmit="showLoading()">
+                    <button type="submit" id="checkBtn" 
+                            class="px-8 py-3 bg-indigo-600 text-white rounded-lg font-bold shadow-lg hover:bg-indigo-700 hover:shadow-xl transition transform hover:-translate-y-0.5 flex items-center">
+                        <span>Провери статус сега</span>
+                        <i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+                </form>
+
+                <div id="loading" class="hidden mt-8 text-center">
+                    <i class="fas fa-circle-notch fa-spin text-indigo-600 text-4xl mb-4"></i>
+                    <p class="text-gray-600 font-medium">Свързване с Гаранционен фонд...</p>
+                    <p class="text-xs text-gray-400 mt-2">Това може да отнеме до 10-15 секунди.</p>
+                </div>
+            </div>
+        <% } %>
     </div>
 </div>
+
+<script>
+    function showLoading() {
+        document.getElementById('checkBtn').classList.add('hidden');
+        document.getElementById('loading').classList.remove('hidden');
+    }
+</script>
+
+<style>
+    .gf-result-container table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .gf-result-container th, .gf-result-container td { padding: 10px; border: 1px solid #e5e7eb; text-align: left; }
+    .gf-result-container th { background-color: #f9fafb; font-weight: 600; }
+</style>
 
 <%- include('../partials/footer') %>

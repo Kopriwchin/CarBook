@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const Vehicle = require('../models/Vehicle');
-const puppeteer = require('puppeteer');
 
-// Съхраняваме активните сесии на Puppeteer (Browser Pages)
-// Key: UserID, Value: { browser, page }
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+
 const activeCheckSessions = new Map();
 
 const requireLogin = (req, res, next) => {
@@ -27,9 +28,6 @@ async function getCar(req, res) {
     }
 }
 
-// --------------------------------------------------------
-// 1. GET: Зареждане на страницата и вземане на CAPTCHA
-// --------------------------------------------------------
 router.get('/check/inspection/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
     if (!car) return;
@@ -76,153 +74,302 @@ router.get('/check/inspection/:id', requireLogin, async (req, res) => {
     }
 });
 
-// --------------------------------------------------------
-// 2. POST: Изпращане на данните и получаване на резултат
-// --------------------------------------------------------
-router.post('/check/inspection/:id', requireLogin, async (req, res) => {
+router.post('/check/insurance/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
-    if (!car) return;
-
-    const { captchaCode } = req.body;
-    const session = activeCheckSessions.get(req.session.userId);
-
-    if (!session) {
-        return res.render('checks/inspection', { car, captchaImage: null, error: 'Сесията изтече. Моля, презаредете страницата.', result: null });
+    if (!car) {
+        return;
     }
 
-    const { browser, page } = session;
+    const targetUrl = 'https://www.guaranteefund.org/bg/%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%BE%D0%BD%D0%B5%D0%BD-%D1%86%D0%B5%D0%BD%D1%82%D1%8A%D1%80-%D0%B8-%D1%81%D0%BF%D1%80%D0%B0%D0%B2%D0%BA%D0%B8/%D1%83%D1%81%D0%BB%D1%83%D0%B3%D0%B8/%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0-%D0%B7%D0%B0-%D0%B2%D0%B0%D0%BB%D0%B8%D0%B4%D0%BD%D0%B0-%D0%B7%D0%B0%D1%81%D1%82%D1%80%D0%B0%D1%85%D0%BE%D0%B2%D0%BA%D0%B0-%D0%B3%D1%80a%D0%B6%D0%B4a%D0%BD%D1%81%D0%BAa-%D0%BE%D1%82%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%BD%D0%BE%D1%81%D1%82-%D0%BD%D0%B0-%D0%B0%D0%B2%D1%82%D0%BE%D0%BC%D0%BE%D0%B1%D0%B8%D0%BB%D0%B8%D1%81%D1%82%D0%B8%D1%82%D0%B5';
+
+    let browser = null;
+    let page = null;
 
     try {
-        // 1. Попълваме регистрационния номер (махаме интервалите)
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--window-size=1920,1080'
+            ]
+        });
+
+        page = await browser.newPage();
+        await page.setViewport({ width: 1920, height: 1080 });
+
+        await page.goto(targetUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
+
+        await page.waitForSelector('#dkn', { timeout: 30000 });
         const cleanPlate = car.regPlate.replace(/\s+/g, '').toUpperCase();
-        
-        // Намираме полето за рег. номер (Knockout bind-ва input-а)
-        // В HTML-а е input с placeholder "Рег. номер"
-        await page.type('input[placeholder="Рег. номер"]', cleanPlate);
+        await page.type('#dkn', cleanPlate, { delay: 60 });
 
-        // 2. Попълваме Капчата
-        // В HTML-а е input с placeholder "Код"
-        await page.type('input[placeholder="Код"]', captchaCode);
+        const altchaCheckbox = 'input[name="altcha_checkbox"]';
+        if (await page.$(altchaCheckbox)) {
+            await page.click(altchaCheckbox);
 
-        // 3. Натискаме бутона "Провери" (.submit)
-        await page.click('a.submit');
-
-        // 4. Чакаме резултат
-        // Резултатът се появява в div с клас "result" и под-дивове "resultYes" или "resultNo"
-        try {
-            await page.waitForSelector('.result', { visible: true, timeout: 5000 });
-            // Чакаме малко Knockout да обнови DOM-а
-            await new Promise(r => setTimeout(r, 1000));
-        } catch (e) {
-            throw new Error('Времето за изчакване изтече или капчата е грешна.');
+            try {
+                await page.waitForFunction(() => {
+                    const el = document.querySelector('.altcha');
+                    return el && el.getAttribute('data-state') === 'verified';
+                }, { timeout: 20000 });
+            } catch (_) {
+                // ако таймне – продължаваме, понякога става async
+            }
         }
 
-        // 5. Проверяваме за грешка (напр. грешна капча)
-        const isCaptchaError = await page.$('.captchaInput.error');
-        if (isCaptchaError) {
-            throw new Error('Грешен код за сигурност (Captcha). Опитайте отново.');
-        }
+        await page.click('input[name="send"]');
 
-        // 6. Извличаме данните (Scraping)
-        // Проверяваме дали има успех (resultYes е видим)
-        const successElement = await page.$('.resultYes');
-        const failElement = await page.$('.resultNo');
-        
-        let resultData = {};
+        await page.waitForFunction(() => {
+            return document.querySelector('#printresult');
+        }, { timeout: 20000 });
 
-        if (successElement && await successElement.isVisible()) {
-            // УСПЕШЕН ПРЕГЛЕД
-            const extracted = await page.evaluate(() => {
-                const container = document.querySelector('.resultYes');
-                // Взимаме всички елементи с клас "reg"
-                const regElements = container.querySelectorAll('.reg');
-                const vinElement = container.querySelector('var[data-bind*="rvIdentNumber"]');
-                
-                // HTML СТРУКТУРА СПОРЕД ТВОЯ КОД:
-                // regElements[0] -> Рег. номер (CT4373PP)
-                // regElements[1] -> Еко група (4)
-                // regElements[2] -> Текст "валиден до" (НЕНУЖЕН)
-                // regElements[3] -> Датата (17.05.2026)
+        const insuranceData = await page.evaluate(() => {
+            const container = document.querySelector('#printresult');
+            if (!container) {
+                return { found: false };
+            }
 
+            const statusText = container.querySelector('h6')?.innerText || '';
+
+            const table = container.querySelector('table.success-results');
+            if (!table) {
                 return {
-                    plate: regElements[0]?.innerText.trim(),
-                    eco: regElements[1]?.innerText.trim() || '-',
-                    // ВЗИМАМЕ ИНДЕКС 3 ЗА ДАТАТА:
-                    date: regElements[3]?.innerText.trim(), 
-                    vin: vinElement?.innerText.trim()
+                    found: false,
+                    message: statusText || 'Няма намерена активна застраховка'
                 };
-            });
+            }
 
-            // Форматираме текста както ти поиска
-            const formattedHTML = `
-                Превозното средство с регистрационен номер <b>${extracted.plate}</b> с <b>ЕКО Група ${extracted.eco}</b><br>
-                <b>Има</b> валиден периодичен технически преглед!<br><br>
-                Валиден до <b>${extracted.date}</b><br>
-                Идент. № (VIN, рама): ${extracted.vin}
+            const cells = table.querySelectorAll('tbody tr td');
+
+            return {
+                found: true,
+                active: statusText.includes('има валидна'),
+                insurer: cells[0]?.innerText.trim() || '',
+                startDate: cells[1]?.innerText.replace(/\s+/g, ' ').trim() || '',
+                endDate: cells[2]?.innerText.replace(/\s+/g, ' ').trim() || ''
+            };
+        });
+
+        let resultHtml = null;
+
+        if (insuranceData.found && insuranceData.active) {
+            resultHtml = `
+                <div class="space-y-3">
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-500">Статус</span>
+                        <span class="font-bold text-green-600">Активна</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-500">Застраховател</span>
+                        <span class="font-bold text-gray-900">${insuranceData.insurer}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-500">Валидна от</span>
+                        <span>${insuranceData.startDate}</span>
+                    </div>
+                    <div class="flex justify-between pt-2">
+                        <span class="text-gray-500">Валидна до</span>
+                        <span class="font-bold">${insuranceData.endDate}</span>
+                    </div>
+                </div>
             `;
-
-            resultData = { success: true, text: formattedHTML };
-
-        } else if (failElement && await failElement.isVisible()) {
-            // НЕУСПЕШЕН / ИЗТЕКЪЛ ПРЕГЛЕД
-            // Структурата при resultNo е идентична за датите
-            const extractedFail = await page.evaluate(() => {
-                const container = document.querySelector('.resultNo');
-                const regElements = container.querySelectorAll('.reg');
-                const vinElement = container.querySelector('var[data-bind*="rvIdentNumber"]');
-
-                return {
-                    plate: regElements[0]?.innerText.trim(),
-                    // При resultNo датата на изтичане пак е на индекс 3 ("изтекъл на" е индекс 2)
-                    date: regElements[3]?.innerText.trim(),
-                    vin: vinElement?.innerText.trim()
-                };
-            });
-
-            const formattedFailHTML = `
-                Превозното средство с регистрационен номер <b>${extractedFail.plate}</b><br>
-                <b style="color:red">НЯМА</b> валиден периодичен технически преглед!<br><br>
-                Изтекъл на <b>${extractedFail.date}</b><br>
-                Идент. № (VIN, рама): ${extractedFail.vin}
-            `;
-
-            resultData = { success: false, text: formattedFailHTML };
         } else {
-             // ... грешките остават същите
-             const regError = await page.$('.vehicleRegistrationNumber.error');
-             if(regError) throw new Error('Невалиден формат на регистрационния номер.');
-             throw new Error('Неуспешно разчитане на резултата.');
+            resultHtml = `
+                <div class="text-center text-red-600 font-bold">
+                    ❌ Няма активна застраховка
+                </div>
+            `;
         }
 
-        // 7. Затваряме браузъра и връщаме отговор
         await browser.close();
-        activeCheckSessions.delete(req.session.userId);
 
-        res.render('checks/inspection', { 
-            car, 
-            captchaImage: null, 
-            error: null, 
-            result: resultData 
+        return res.render('checks/insurance', {
+            car,
+            result: resultHtml,
+            error: null,
+            loading: false
         });
 
     } catch (err) {
-        console.error("Check Error:", err);
-        // При грешка затваряме браузъра
-        await browser.close();
-        activeCheckSessions.delete(req.session.userId);
+        console.error('Insurance check error:', err);
 
-        res.render('checks/inspection', { 
-            car, 
-            captchaImage: null, // Трябва рефреш за нова капча
-            error: err.message, 
-            result: null 
+        if (page) {
+            try {
+                await page.screenshot({
+                    path: 'ERROR_SNAPSHOT.png',
+                    fullPage: true
+                });
+            } catch (_) {}
+        }
+
+        if (browser) {
+            await browser.close();
+        }
+
+        return res.render('checks/insurance', {
+            car,
+            result: null,
+            error: 'Възникна грешка при проверката. Виж ERROR_SNAPSHOT.png',
+            loading: false
         });
     }
 });
 
-// Другите routes (Placeholder)
-router.get('/check/insurance/:id', requireLogin, async (req, res) => { /* ... */ res.send("Скоро"); });
-router.get('/check/vignette/:id', requireLogin, async (req, res) => { /* ... */ res.send("Скоро"); });
-router.get('/check/fines/:id', requireLogin, async (req, res) => { /* ... */ res.send("Скоро"); });
+router.get('/check/insurance/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    if (!car)
+        return;
+    
+    res.render('checks/insurance', { car, result: null, error: null, loading: false });
+});
+
+router.post('/check/insurance/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    if (!car) return;
+
+    // Използваме encodeURI, за да сме сигурни, че кирилицата в адреса не чупи Puppeteer
+    const targetUrl = encodeURI('https://www.guaranteefund.org/bg/%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%BE%D0%BD%D0%B5%D0%BD-%D1%86%D0%B5%D0%BD%D1%82%D1%8A%D1%80-%D0%B8-%D1%81%D0%BF%D1%80%D0%B0%D0%B2%D0%BA%D0%B8/%D1%83%D1%81%D0%BB%D1%83%D0%B3%D0%B8/%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0-%D0%B7%D0%B0-%D0%B2%D0%B0%D0%BB%D0%B8%D0%B4%D0%BD%D0%B0-%D0%B7%D0%B0%D1%81%D1%82%D1%80%D0%B0%D1%85%D0%BE%D0%B2%D0%BA%D0%B0-%D0%B3%D1%80%D0%B0%D0%BD%D0%B8%D1%87%D0%BD%D0%B0-%D0%B3%D1%80%D0%B0%D0%B6%D0%B4%D0%B0%D0%BD%D1%81%D0%BA%D0%B0-%D0%BE%D1%82%D0%B3%D0%BE%D0%B2%D0%BE%D1%80%D0%BD%D0%BE%D1%81%D1%82#validgo');
+
+    let browser = null;
+
+    try {
+        // 1. Стартираме браузъра във ВИДИМ режим (за да дебъгваш)
+        browser = await puppeteer.launch({ 
+            headless: false, // ВАЖНО: Виждаш браузъра на екрана си
+            defaultViewport: null, // Използва целия прозорец
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--window-size=1280,800', // Стандартен размер на прозореца
+                '--start-maximized'
+            ]
+        });
+
+        const page = await browser.newPage();
+        
+        // 2. Представяме се за истински Chrome браузър (User Agent Spoofing)
+        // Това е критично, за да не ни блокират
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        console.log("Navigating to GF...");
+        
+        // 3. Зареждане на страницата с по-голям timeout (60 сек)
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+        // Понякога формата е в iframe или се зарежда динамично. 
+        // Чакаме малко повече, за да се уверим, че скриптовете на сайта са сработили.
+        // Тук търсим ID-то на формата, не само на инпута, за по-сигурно.
+        console.log("Waiting for form...");
+        await page.waitForSelector('#dkn', { visible: true, timeout: 30000 });
+
+        console.log("Form found. Typing plate...");
+        
+        // 4. Попълване на Рег. номер
+        const cleanPlate = car.regPlate.replace(/\s+/g, '').toUpperCase();
+        
+        // Пишем бавно, като човек (delay: 100ms)
+        await page.type('#dkn', cleanPlate, { delay: 100 });
+
+        // 5. Справяне с ALTCHA
+        const altchaSelector = 'input[name="altcha_checkbox"]';
+        
+        // Проверяваме дали Altcha съществува
+        const altchaExists = await page.$(altchaSelector);
+        if (altchaExists) {
+            console.log("Clicking Altcha...");
+            await page.click(altchaSelector);
+            
+            // Чакаме верификация (до 20 секунди)
+            // Търсим елемент, който показва, че проверката е минала
+            try {
+                await page.waitForFunction(() => {
+                    const el = document.querySelector('.altcha');
+                    return el && el.getAttribute('data-state') === 'verified';
+                }, { timeout: 20000 });
+                console.log("Altcha verified!");
+            } catch (e) {
+                console.log("Warning: Altcha verify check timed out, trying to submit anyway...");
+            }
+        } else {
+            console.log("Altcha not found on page?");
+        }
+
+        // 6. Изпращане (Кликаме бутона "Търси")
+        await page.click('input[name="send"]');
+
+        console.log("Submitted. Waiting for results...");
+
+        // 7. Чакаме резултата
+        // Важно: Тук чакаме нещо да се промени. 
+        // Ако сайтът презарежда страницата, използваме waitForNavigation
+        // Ако сайтът ползва AJAX, чакаме селектор.
+        // При ГФ обикновено формата изчезва или се появява съобщение.
+        
+        // Изчакваме мрежовата активност да утихне
+        try {
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+        } catch(e) {
+            // Ако не навигира, значи е обновило DOM-а на място
+        }
+
+        // 8. Взимаме HTML-а на резултата
+        const resultHTML = await page.evaluate(() => {
+            // Опитваме се да намерим контейнера с резултата
+            // Често ГФ връща резултата в <div class="article-content"> или подобно
+            
+            // Проверяваме за грешки на екрана
+            const errorMsg = document.querySelector('.system_msg'); // Пример
+            if (errorMsg) return `<b style="color:red">${errorMsg.innerText}</b>`;
+
+            // Проверяваме за таблица с резултати
+            const resultTable = document.querySelector('table'); 
+            // Взимаме бодито, за да видим какво е станало, ако няма специфичен селектор
+            const content = document.querySelector('.article-content') || document.body;
+            
+            // Чистим формата, за да не я показваме
+            const form = content.querySelector('form');
+            if (form) form.remove();
+
+            return content.innerHTML;
+        });
+
+        await browser.close();
+
+        res.render('checks/insurance', { 
+            car, 
+            result: resultHTML, 
+            error: null,
+            loading: false
+        });
+
+    } catch (err) {
+        console.error("Puppeteer Error:", err);
+        
+        // Правим снимка на грешката, за да я видиш във папката на проекта!
+        if (browser) {
+            const pages = await browser.pages();
+            if (pages.length > 0) {
+                await pages[0].screenshot({ path: 'debug-error.png' });
+                console.log("Screenshot saved to debug-error.png");
+            }
+            await browser.close();
+        }
+
+        res.render('checks/insurance', { 
+            car, 
+            result: null, 
+            error: 'Грешка: ' + err.message,
+            loading: false
+        });
+    }
+});
+
+router.get('/check/vignette/:id', requireLogin, async (req, res) => { res.send("Скоро"); });
+
+router.get('/check/fines/:id', requireLogin, async (req, res) => { res.send("Скоро"); });
 
 module.exports = router;
