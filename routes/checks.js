@@ -32,7 +32,6 @@ router.get('/check/inspection/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
     if (!car) return;
 
-    // Ако има стара отворена сесия за този потребител, я затваряме
     if (activeCheckSessions.has(req.session.userId)) {
         const oldSession = activeCheckSessions.get(req.session.userId);
         try { await oldSession.browser.close(); } catch(e){}
@@ -40,27 +39,21 @@ router.get('/check/inspection/:id', requireLogin, async (req, res) => {
     }
 
     try {
-        // 1. Стартираме скрит браузър
         const browser = await puppeteer.launch({ 
-            headless: true, // Промени на false, ако искаш да гледаш какво става (за дебъг)
+            headless: true, 
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         const page = await browser.newPage();
 
-        // 2. Отиваме на официалния сайт
         await page.goto('https://rta.government.bg/services/check-inspection/index.html', { waitUntil: 'networkidle2' });
 
-        // 3. Чакаме картинката на капчата да се зареди
         await page.waitForSelector('.captcha img');
 
-        // 4. Взимаме елемента на капчата и правим скрийншот (Base64)
         const captchaElement = await page.$('.captcha img');
         const captchaImageBase64 = await captchaElement.screenshot({ encoding: 'base64' });
-
-        // 5. Запазваме сесията, за да я ползваме в POST заявката
+        
         activeCheckSessions.set(req.session.userId, { browser, page });
 
-        // 6. Рендираме нашата страница с картинката
         res.render('checks/inspection', { 
             car, 
             captchaImage: `data:image/png;base64,${captchaImageBase64}`,
@@ -250,56 +243,42 @@ router.post('/check/vignette/:id', requireLogin, async (req, res) => {
         const page = pages[0];
         await page.setViewport({ width: 1920, height: 1080 });
 
-        // 1. Зареждане
         await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
-        // 2. Намиране на полето (Input)
-        // Тъй като е React, чакаме формата да се появи
         await page.waitForSelector('.CarRegistrationForm input', { timeout: 15000 });
 
-        // Почистване на номера (BG Toll иска слято, напр. СТ4373РР)
         const cleanPlate = car.regPlate.replace(/\s+/g, '').toUpperCase();
         
-        // Кликаме в полето и пишем (за да тригернем React event-ите)
         await page.click('.CarRegistrationForm input');
         await page.type('.CarRegistrationForm input', cleanPlate, { delay: 100 });
 
-        // 3. Натискане на бутона "Проверка"
-        // Търсим бутон със зелен клас вътре във формата
         await page.click('.CarRegistrationForm .btn-success');
-
-        // 4. Чакаме резултат
-        // Тук има два варианта: Или таблица с резултати, или съобщение (ако няма винетка)
-        // Ще изчакаме контейнера .CheckResult
+        
         try {
             await page.waitForSelector('.CheckResult', { visible: true, timeout: 10000 });
         } catch (e) {
             throw new Error("Няма намерени данни или сайтът не отговаря.");
         }
 
-        // 5. Извличане на данни (Scraping)
         const resultHTML = await page.evaluate(() => {
-            // Проверяваме дали има таблица
+            
             const table = document.querySelector('.CheckResult table');
             
             if (!table) {
-                // Ако контейнерът се е появил, но няма таблица, значи няма винетки
+                
                 return `<div class="text-center bg-red-50 p-6 rounded-lg border border-red-100">
                             <i class="fas fa-times-circle text-red-500 text-3xl mb-3"></i>
                             <h3 class="text-lg font-bold text-red-700">Няма активна винетка</h3>
                             <p class="text-red-600 text-sm mt-1">За този автомобил не са намерени данни за електронна винетка.</p>
                         </div>`;
             }
-
-            // Ако има таблица, взимаме редовете (може да са повече от една винетка)
+            
             const rows = Array.from(table.querySelectorAll('tbody tr'));
             
             let htmlCards = '';
 
             rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
-                // Mapping според HTML-а, който предостави:
-                // [0] ID, [1] Vehicle Class, [2] Emission, [3] Start, [4] End, [5] Price, [6] Status
                 
                 const vignetteId = cells[0]?.innerText || '-';
                 const startDate = cells[3]?.innerText || '-';
@@ -308,8 +287,6 @@ router.post('/check/vignette/:id', requireLogin, async (req, res) => {
                 const statusText = statusElement?.innerText.trim() || 'Неизвестен';
                 const price = cells[5]?.innerText || '-';
 
-                // Определяме цвета на статуса
-                // Класът 'paid' обикновено е зелен, но проверяваме и текста
                 const isActive = statusText.toLowerCase().includes('активна');
                 const statusColor = isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
 
@@ -367,6 +344,125 @@ router.post('/check/vignette/:id', requireLogin, async (req, res) => {
     }
 });
 
-router.get('/check/fines/:id', requireLogin, async (req, res) => { res.send("Скоро"); });
+const User = require('../models/User');
+
+router.get('/check/fines/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    const user = await User.findById(req.session.userId);
+    
+    if (!car || !user) return;
+
+    const hasData = user.egn && user.sumps && user.egn.length === 10 && user.sumps.length === 9;
+
+    res.render('checks/fines', { 
+        car, 
+        user,
+        hasData,
+        result: null, 
+        error: null, 
+        loading: false 
+    });
+});
+
+router.post('/check/fines/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    const user = await User.findById(req.session.userId);
+    if (!car || !user) return;
+    if (!user.egn || !user.sumps) return res.redirect('/profile');
+
+    const targetUrl = 'https://e-uslugi.mvr.bg/services/obligations';
+    let browser = null;
+
+    try {
+        browser = await puppeteer.launch({ 
+            headless: true, // Скрит режим
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080']
+        });
+
+        const pages = await browser.pages();
+        const page = pages[0];
+        await page.setViewport({ width: 1920, height: 1080 });
+
+        // 1. Зареждане
+        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+
+        // 2. Попълване на ЕГН (Robust method)
+        await page.waitForSelector('#obligedPersonIdent', { timeout: 30000 });
+        await page.click('#obligedPersonIdent');
+        await page.type('#obligedPersonIdent', user.egn, { delay: 100 });
+
+        // 3. Избор на СУМПС
+        await page.select('#additionalData', '1');
+        await new Promise(r => setTimeout(r, 500)); // Кратка пауза за React
+
+        // 4. Попълване на СУМПС
+        await page.waitForSelector('#drivingLicenceNumber', { visible: true });
+        await page.click('#drivingLicenceNumber');
+        await page.type('#drivingLicenceNumber', user.sumps, { delay: 100 });
+        
+        // Симулираме натискане на TAB, за да потвърдим полето
+        await page.keyboard.press('Tab');
+        await new Promise(r => setTimeout(r, 500));
+
+        // 5. Клик на бутона
+        await page.evaluate(() => {
+            const btn = document.querySelector('button.btn-primary');
+            if(btn) btn.click();
+        });
+
+        // 6. Изчакване на резултат (Игнорираме инструкциите)
+        try {
+            await page.waitForFunction(() => {
+                const alerts = Array.from(document.querySelectorAll('.alert-info'));
+                const instructionText = "В резултата от проверката ще се визуализират";
+                // Връща true, ако намерим alert, който НЕ е инструкцията
+                return alerts.some(el => !el.innerText.includes(instructionText));
+            }, { timeout: 30000 });
+        } catch(e) {
+            // Ако тайм-аутне, пак пробваме да четем, може просто да е бавно
+        }
+
+        // 7. Извличане и Анализ
+        const resultData = await page.evaluate(() => {
+            const alerts = Array.from(document.querySelectorAll('.alert-info'));
+            let messages = alerts.map(el => el.innerText.trim());
+
+            // Филтрираме инструкцията
+            const instructionPhrase = "В резултата от проверката ще се визуализират";
+            messages = messages.filter(msg => !msg.includes(instructionPhrase));
+
+            // Ако след филтъра няма нищо -> проблем или още зарежда
+            if (messages.length === 0) return null;
+
+            const successPhrase = "няма данни за неплатени задължения";
+            const isClean = messages.some(msg => msg.includes(successPhrase));
+
+            return {
+                hasFines: !isClean,
+                messages: messages
+            };
+        });
+
+        await browser.close();
+
+        if (!resultData) {
+            throw new Error("Не получихме валиден отговор от системата на МВР.");
+        }
+
+        res.render('checks/fines', { 
+            car, user, hasData: true, result: resultData, error: null, loading: false 
+        });
+
+    } catch (err) {
+        console.error("MVR Error:", err.message);
+        if (browser) await browser.close();
+        
+        res.render('checks/fines', { 
+            car, user, hasData: true, result: null, 
+            error: 'Възникна грешка при проверката. Моля опитайте отново по-късно.', 
+            loading: false 
+        });
+    }
+});
 
 module.exports = router;

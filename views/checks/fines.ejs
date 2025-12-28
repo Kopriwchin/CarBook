@@ -1,0 +1,178 @@
+<%- include('../partials/header') %>
+
+<div class="max-w-4xl mx-auto">
+    <a href="/dashboard" class="text-gray-500 hover:text-indigo-600 mb-6 inline-block transition">
+        <i class="fas fa-arrow-left mr-1"></i> Назад към таблото
+    </a>
+
+    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Проверка за Глоби (МВР)</h1>
+            <p class="text-gray-500 text-sm mt-1">Справка по ЕГН и СУМПС за невръчени фишове и НП</p>
+        </div>
+        <div class="mt-4 md:mt-0 text-right bg-gray-50 p-3 rounded-lg border border-gray-100">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Проверка за водач</div>
+            <div class="font-bold text-gray-800 flex items-center justify-end">
+                <i class="fas fa-user mr-2 text-indigo-500"></i>
+                <%= user.email.split('@')[0] %>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white p-8 rounded-xl shadow-lg border border-gray-100 min-h-[300px]">
+
+        <% if (!hasData) { %>
+            <div class="text-center py-12">
+                <div class="bg-yellow-50 p-5 rounded-full mb-6 inline-block shadow-sm">
+                    <i class="fas fa-id-card text-yellow-600 text-4xl"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-gray-900 mb-3">Липсващи данни</h3>
+                <p class="text-gray-600 max-w-lg mx-auto mb-8 leading-relaxed">
+                    За да извършите проверка в портала на МВР, е необходимо да въведете вашето <b>ЕГН</b> и номер на <b>СУМПС</b> (Шофьорска книжка) във вашия профил.
+                </p>
+                <a href="/profile" class="inline-flex items-center px-8 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
+                    Към Профила <i class="fas fa-arrow-right ml-2"></i>
+                </a>
+            </div>
+
+        <% } else { %>
+
+            <% if (error) { %>
+                <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-8 rounded-r-lg">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <i class="fas fa-exclamation-circle text-red-500 mt-0.5"></i>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-red-800">Възникна грешка</h3>
+                            <p class="text-sm text-red-700 mt-1"><%= error %></p>
+                            <form action="/check/fines/<%= car._id %>" method="POST" class="mt-3">
+                                <button type="submit" class="text-sm font-medium text-red-700 hover:text-red-900 underline">
+                                    Опитайте отново
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            <% } %>
+
+            <% if (result) { %>
+                <div class="max-w-3xl mx-auto animate-fade-in-up">
+                    
+                    <% if (result.hasFines === false) { %>
+                        <div class="text-center bg-green-50 p-10 rounded-xl border border-green-100 shadow-sm">
+                            <div class="bg-white p-4 rounded-full inline-block shadow-sm mb-4">
+                                <i class="fas fa-check-circle text-green-500 text-5xl"></i>
+                            </div>
+                            <h3 class="text-2xl font-bold text-green-800 mb-2">Чисто досие!</h3>
+                            <p class="text-green-700 font-medium">
+                                Няма открити неплатени задължения по фиш или НП.
+                            </p>
+                            <div class="mt-6 text-xs text-green-600 border-t border-green-200 pt-4 uppercase tracking-wider">
+                                <i class="fas fa-shield-alt mr-1"></i> Справка от системата на МВР
+                            </div>
+                        </div>
+
+                    <% } else { %>
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+                            <div class="bg-orange-50 p-5 border-b border-orange-100 flex items-center">
+                                <div class="bg-orange-100 p-2 rounded-full mr-3">
+                                    <i class="fas fa-exclamation-triangle text-orange-600 text-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-bold text-orange-900">Резултат от справката</h3>
+                                    <p class="text-xs text-orange-700">Намерени са следните записи:</p>
+                                </div>
+                            </div>
+                            
+                            <div class="p-6 space-y-4 bg-gray-50">
+                                <% if (result.messages && result.messages.length > 0) { %>
+                                    <% result.messages.forEach(msg => { %>
+                                        <div class="flex items-start bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+                                            <i class="fas fa-info-circle text-blue-400 mt-1 mr-4 text-lg"></i>
+                                            <p class="text-gray-700 leading-relaxed font-medium"><%= msg %></p>
+                                        </div>
+                                    <% }) %>
+                                <% } else { %>
+                                    <p class="text-gray-600 italic">Има данни, но не успяхме да ги разчетем. Моля проверете ръчно в сайта на МВР.</p>
+                                <% } %>
+                            </div>
+                        </div>
+                    <% } %>
+
+                    <div class="mt-10 text-center">
+                        <a href="/dashboard" class="px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition shadow-md">
+                            Обратно към таблото
+                        </a>
+                    </div>
+                </div>
+
+            <% } else if (!error) { %>
+                <div class="flex flex-col items-center justify-center py-8">
+                    <div class="bg-blue-50 p-5 rounded-full mb-6 shadow-sm">
+                        <i class="fas fa-gavel text-blue-600 text-4xl"></i>
+                    </div>
+                    
+                    <h3 class="text-2xl font-bold text-gray-900 mb-3">Проверка за задължения</h3>
+                    
+                    <div class="text-gray-500 text-center max-w-md mb-8 text-sm leading-relaxed">
+                        <p class="mb-4">Ще бъде извършена автоматична проверка в портала на МВР, използвайки вашите запазени данни:</p>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 text-left w-full max-w-sm mx-auto shadow-inner">
+                            <div class="flex justify-between mb-2 border-b border-gray-200 pb-2">
+                                <span class="text-gray-500">ЕГН:</span>
+                                <span class="font-mono font-bold text-gray-800"><%= user.egn %></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-500">СУМПС:</span>
+                                <span class="font-mono font-bold text-gray-800"><%= user.sumps %></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form action="/check/fines/<%= car._id %>" method="POST" onsubmit="showLoading()">
+                        <button type="submit" id="checkBtn" 
+                                class="px-10 py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 hover:shadow-xl transition transform hover:-translate-y-0.5 flex items-center text-lg">
+                            <span>Провери за глоби</span>
+                            <i class="fas fa-search ml-3"></i>
+                        </button>
+                    </form>
+
+                    <div id="loading" class="hidden mt-8 text-center bg-blue-50 p-6 rounded-xl border border-blue-100 max-w-sm mx-auto">
+                        <i class="fas fa-circle-notch fa-spin text-blue-600 text-4xl mb-4"></i>
+                        <h4 class="text-blue-900 font-bold text-lg">Свързване с МВР...</h4>
+                        <p class="text-blue-700 text-sm mt-1">Моля, не затваряйте страницата.</p>
+                        <p class="text-xs text-blue-400 mt-2">Това може да отнеме до 30 секунди.</p>
+                    </div>
+                </div>
+            <% } %>
+
+        <% } %>
+    </div>
+</div>
+
+<script>
+    // Скрипт за показване на лоадинг анимацията
+    function showLoading() {
+        const btn = document.getElementById('checkBtn');
+        const loading = document.getElementById('loading');
+        
+        if(btn && loading) {
+            btn.classList.add('hidden'); // Скрива бутона
+            loading.classList.remove('hidden'); // Показва спинъра
+        }
+    }
+</script>
+
+<style>
+    /* Малка анимация за появяване на резултатите */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in-up {
+        animation: fadeInUp 0.5s ease-out forwards;
+    }
+</style>
+
+<%- include('../partials/footer') %>
