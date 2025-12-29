@@ -28,45 +28,6 @@ async function getCar(req, res) {
     }
 }
 
-router.get('/check/inspection/:id', requireLogin, async (req, res) => {
-    const car = await getCar(req, res);
-    if (!car) return;
-
-    if (activeCheckSessions.has(req.session.userId)) {
-        const oldSession = activeCheckSessions.get(req.session.userId);
-        try { await oldSession.browser.close(); } catch(e){}
-        activeCheckSessions.delete(req.session.userId);
-    }
-
-    try {
-        const browser = await puppeteer.launch({ 
-            headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        const page = await browser.newPage();
-
-        await page.goto('https://rta.government.bg/services/check-inspection/index.html', { waitUntil: 'networkidle2' });
-
-        await page.waitForSelector('.captcha img');
-
-        const captchaElement = await page.$('.captcha img');
-        const captchaImageBase64 = await captchaElement.screenshot({ encoding: 'base64' });
-        
-        activeCheckSessions.set(req.session.userId, { browser, page });
-
-        res.render('checks/inspection', { 
-            car, 
-            captchaImage: `data:image/png;base64,${captchaImageBase64}`,
-            error: null,
-            result: null
-        });
-
-    } catch (error) {
-        console.error("Puppeteer Error:", error);
-        res.render('checks/inspection', { car, captchaImage: null, error: 'Грешка при връзка със системата на ИААА.', result: null });
-    }
-});
-
 router.get('/check/insurance/:id', requireLogin, async (req, res) => {
     const car = await getCar(req, res);
     if (!car)
@@ -118,7 +79,7 @@ router.post('/check/insurance/:id', requireLogin, async (req, res) => {
                     return el && el.getAttribute('data-state') === 'verified';
                 }, { timeout: 20000 });
             } catch (_) {
-                // ако таймне – продължаваме, понякога става async
+                // If timeout occurs - we continue, sometimes it happens asynchronously
             }
         }
 
@@ -216,6 +177,121 @@ router.post('/check/insurance/:id', requireLogin, async (req, res) => {
             result: null,
             error: 'Възникна грешка при проверката. Виж ERROR_SNAPSHOT.png',
             loading: false
+        });
+    }
+});
+
+router.get('/check/inspection/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    if (!car) return;
+
+    if (activeCheckSessions.has(req.session.userId)) {
+        const oldSession = activeCheckSessions.get(req.session.userId);
+        try { await oldSession.browser.close(); } catch(e){}
+        activeCheckSessions.delete(req.session.userId);
+    }
+
+    try {
+        const browser = await puppeteer.launch({ 
+            headless: true, 
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+
+        await page.goto('https://rta.government.bg/services/check-inspection/index.html', { waitUntil: 'networkidle2' });
+
+        await page.waitForSelector('.captcha img');
+
+        const captchaElement = await page.$('.captcha img');
+        const captchaImageBase64 = await captchaElement.screenshot({ encoding: 'base64' });
+        
+        activeCheckSessions.set(req.session.userId, { browser, page });
+
+        res.render('checks/inspection', { 
+            car, 
+            captchaImage: `data:image/png;base64,${captchaImageBase64}`,
+            error: null,
+            result: null
+        });
+
+    } catch (error) {
+        console.error("Puppeteer Error:", error);
+        res.render('checks/inspection', { car, captchaImage: null, error: 'Грешка при връзка със системата на ИААА.', result: null });
+    }
+});
+
+router.post('/check/inspection/:id', requireLogin, async (req, res) => {
+    const car = await getCar(req, res);
+    if (!car) return;
+
+    const { captchaCode } = req.body;
+    const session = activeCheckSessions.get(req.session.userId);
+
+    if (!session) {
+        return res.render('checks/inspection', { car, captchaImage: null, error: 'Сесията изтече. Моля, презаредете страницата.', result: null });
+    }
+
+    const { browser, page } = session;
+
+    try {
+        const cleanPlate = car.regPlate.replace(/\s+/g, '').toUpperCase();
+        
+        await page.type('input[placeholder="Рег. номер"]', cleanPlate);
+
+        await page.type('input[placeholder="Код"]', captchaCode);
+
+        await page.click('a.submit');
+
+        try {
+            await page.waitForSelector('.result', { visible: true, timeout: 5000 });
+            await new Promise(r => setTimeout(r, 1000));
+        } catch (e) {
+            throw new Error('Времето за изчакване изтече или капчата е грешна.');
+        }
+
+        const isCaptchaError = await page.$('.captchaInput.error');
+        if (isCaptchaError) {
+            throw new Error('Грешен код за сигурност (Captcha). Опитайте отново.');
+        }
+
+        const successElement = await page.$('.resultYes');
+        const failElement = await page.$('.resultNo');
+        
+        let resultData = {};
+
+        if (successElement && await successElement.isVisible()) {
+            const validText = await page.$eval('.resultYes', el => el.innerText);
+            resultData = { success: true, text: validText };
+        } else if (failElement && await failElement.isVisible()) {
+            const failText = await page.$eval('.resultNo', el => el.innerText);
+            resultData = { success: false, text: failText };
+        } else {
+             const regError = await page.$('.vehicleRegistrationNumber.error');
+             if(regError) throw new Error('Невалиден формат на регистрационния номер.');
+             
+             throw new Error('Неуспешно разчитане на резултата.');
+        }
+
+        await browser.close();
+        activeCheckSessions.delete(req.session.userId);
+
+        res.render('checks/inspection', { 
+            car, 
+            captchaImage: null, 
+            error: null, 
+            result: resultData 
+        });
+
+    } catch (err) {
+        console.error("Check Error:", err);
+        await browser.close();
+        activeCheckSessions.delete(req.session.userId);
+
+        res.render('checks/inspection', { 
+            car, 
+            captchaImage: null,
+            error: err.message, 
+            result: null 
         });
     }
 });
@@ -375,7 +451,7 @@ router.post('/check/fines/:id', requireLogin, async (req, res) => {
 
     try {
         browser = await puppeteer.launch({ 
-            headless: true, // Скрит режим
+            headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080']
         });
 
@@ -383,55 +459,45 @@ router.post('/check/fines/:id', requireLogin, async (req, res) => {
         const page = pages[0];
         await page.setViewport({ width: 1920, height: 1080 });
 
-        // 1. Зареждане
         await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
-        // 2. Попълване на ЕГН (Robust method)
         await page.waitForSelector('#obligedPersonIdent', { timeout: 30000 });
         await page.click('#obligedPersonIdent');
         await page.type('#obligedPersonIdent', user.egn, { delay: 100 });
 
-        // 3. Избор на СУМПС
         await page.select('#additionalData', '1');
-        await new Promise(r => setTimeout(r, 500)); // Кратка пауза за React
+        await new Promise(r => setTimeout(r, 500));
 
-        // 4. Попълване на СУМПС
         await page.waitForSelector('#drivingLicenceNumber', { visible: true });
         await page.click('#drivingLicenceNumber');
         await page.type('#drivingLicenceNumber', user.sumps, { delay: 100 });
         
-        // Симулираме натискане на TAB, за да потвърдим полето
         await page.keyboard.press('Tab');
         await new Promise(r => setTimeout(r, 500));
 
-        // 5. Клик на бутона
         await page.evaluate(() => {
             const btn = document.querySelector('button.btn-primary');
             if(btn) btn.click();
         });
 
-        // 6. Изчакване на резултат (Игнорираме инструкциите)
         try {
             await page.waitForFunction(() => {
                 const alerts = Array.from(document.querySelectorAll('.alert-info'));
                 const instructionText = "В резултата от проверката ще се визуализират";
-                // Връща true, ако намерим alert, който НЕ е инструкцията
+                
                 return alerts.some(el => !el.innerText.includes(instructionText));
             }, { timeout: 30000 });
         } catch(e) {
-            // Ако тайм-аутне, пак пробваме да четем, може просто да е бавно
+            // If timeout occurs, we try to read just in case it's loading slowly
         }
 
-        // 7. Извличане и Анализ
         const resultData = await page.evaluate(() => {
             const alerts = Array.from(document.querySelectorAll('.alert-info'));
             let messages = alerts.map(el => el.innerText.trim());
 
-            // Филтрираме инструкцията
             const instructionPhrase = "В резултата от проверката ще се визуализират";
             messages = messages.filter(msg => !msg.includes(instructionPhrase));
 
-            // Ако след филтъра няма нищо -> проблем или още зарежда
             if (messages.length === 0) return null;
 
             const successPhrase = "няма данни за неплатени задължения";
